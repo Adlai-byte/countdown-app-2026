@@ -45,8 +45,10 @@ export function ConfettiCannon({ size = 'md', variant = 'default' }: ConfettiCan
         whileHover={{ scale: 1.1 }}
         whileTap={{ scale: 0.9 }}
         onClick={handleClick}
+        aria-label="Launch confetti"
         className={`
-          fixed bottom-24 left-4 z-40
+          fixed bottom-20 left-4 z-40
+          sm:bottom-24
           ${sizeClasses[size]}
           rounded-full bg-gradient-to-br from-gold via-yellow-500 to-orange-500
           flex items-center justify-center

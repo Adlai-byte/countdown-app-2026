@@ -40,16 +40,19 @@ export function MusicToggle() {
     if (musicPlayerPosition) {
       return musicPlayerPosition;
     }
+    // Position above the TabBar: 80px on mobile, 96px on larger screens
+    const bottomOffset = windowSize.width < 640 ? 80 : 96;
     return {
       x: windowSize.width - 80,
-      y: windowSize.height - 160,
+      y: windowSize.height - bottomOffset - 56, // 56px for button height
     };
   };
 
   const handleDragEnd = (_: never, info: { point: { x: number; y: number } }) => {
-    // Constrain position within viewport
+    // Constrain position within viewport, accounting for TabBar
+    const bottomOffset = windowSize.width < 640 ? 80 : 96;
     const newX = Math.max(16, Math.min(info.point.x, windowSize.width - 80));
-    const newY = Math.max(16, Math.min(info.point.y, windowSize.height - 160));
+    const newY = Math.max(16, Math.min(info.point.y, windowSize.height - bottomOffset - 56));
     setMusicPlayerPosition({ x: newX, y: newY });
   };
 
