@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Dices,
@@ -21,6 +21,9 @@ import {
   Wifi,
   Circle,
   Type,
+  Plus,
+  UserPlus,
+  Globe,
 } from 'lucide-react';
 import { SpinWheel } from '@/components/fun/SpinWheel';
 import { ScratchCards } from '@/components/fun/ScratchCards';
@@ -42,6 +45,9 @@ import { SpacePicture } from '@/components/fun/SpacePicture';
 import { BalloonPop } from '@/components/fun/BalloonPop';
 import { ConfettiText } from '@/components/fun/ConfettiText';
 import { Card } from '@/components/ui';
+import { JoinRoomModal, CreateRoomModal, RoomLobby } from '@/components/multiplayer';
+import { useRoom } from '@/hooks/multiplayer';
+import type { GameType } from '@/services/multiplayer/types';
 
 type GameId = 'wheel' | 'scratch' | 'trivia' | 'wyr' | 'hotpotato' | 'truthordare' | 'bingo' | 'charades' | 'colorgame' | 'neverhaveiever' | 'kings' | 'drinkroulette' | 'jokes' | 'fortune' | 'boredom' | 'livetrivia' | 'space' | 'balloonpop' | 'confettitext';
 
@@ -87,9 +93,80 @@ const liveGames: GameConfig[] = [
 
 export function FunPage() {
   const [selectedGame, setSelectedGame] = useState<GameId | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showJoinModal, setShowJoinModal] = useState(false);
+
+  const {
+    room,
+    players,
+    currentPlayer,
+    isHost,
+    isLoading,
+    error,
+    createRoom,
+    joinRoom,
+    leaveRoom,
+    kickPlayer,
+    transferHost,
+    startGame,
+  } = useRoom();
 
   const allGames = [...soloGames, ...partyGames, ...drinkingGames, ...liveGames];
   const currentGame = allGames.find((g) => g.id === selectedGame);
+
+  const handleCreateRoom = async (gameType: GameType, name: string, color: string, emoji: string) => {
+    await createRoom(gameType, name, color, emoji);
+    setShowCreateModal(false);
+  };
+
+  const handleJoinRoom = async (code: string, name: string, color: string, emoji: string) => {
+    await joinRoom(code, name, color, emoji);
+    setShowJoinModal(false);
+  };
+
+  // Map game type to game ID
+  const gameTypeToId: Record<GameType, GameId> = {
+    'would-you-rather': 'wyr',
+    'truth-or-dare': 'truthordare',
+    'charades': 'charades',
+    'bingo': 'bingo',
+    'never-have-i-ever': 'neverhaveiever',
+    'kings': 'kings',
+    'drink-roulette': 'drinkroulette',
+    'hot-potato': 'hotpotato',
+  };
+
+  // Sync game selection with room status for ALL players (host and non-host)
+  useEffect(() => {
+    if (room?.status === 'playing' && room.game_type) {
+      // Game started - navigate all players to the game
+      setSelectedGame(gameTypeToId[room.game_type]);
+    } else if (room?.status === 'lobby' && selectedGame) {
+      // Game ended or returned to lobby - clear game selection
+      setSelectedGame(null);
+    }
+  }, [room?.status, room?.game_type]);
+
+  const handleStartGame = async () => {
+    await startGame();
+    // The useEffect above will handle setting selectedGame for all players
+  };
+
+  // If in a room but game hasn't started, show lobby
+  if (room && room.status === 'lobby') {
+    return (
+      <RoomLobby
+        room={room}
+        players={players}
+        currentPlayer={currentPlayer}
+        isHost={isHost}
+        onStartGame={handleStartGame}
+        onLeaveRoom={leaveRoom}
+        onKickPlayer={kickPlayer}
+        onTransferHost={transferHost}
+      />
+    );
+  }
 
   const renderGame = () => {
     switch (selectedGame) {
@@ -204,6 +281,51 @@ export function FunPage() {
                 </p>
               </motion.div>
 
+              {/* Multiplayer Section */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.05 }}
+                className="mb-6"
+              >
+                <h2 className="text-sm font-medium text-text-muted mb-3 flex items-center gap-2">
+                  <Globe size={16} />
+                  <span>MULTIPLAYER</span>
+                  <span className="text-xs text-text-muted/60">(online)</span>
+                </h2>
+                <div className="grid grid-cols-2 gap-3">
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setShowCreateModal(true)}
+                    className="flex items-center gap-3 p-4 rounded-2xl bg-gradient-to-br from-gold/20 to-orange-500/20 border border-gold/30 hover:border-gold/50 transition-all"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-gold/30 flex items-center justify-center">
+                      <Plus size={20} className="text-gold" />
+                    </div>
+                    <div className="text-left">
+                      <span className="text-sm font-semibold text-text-primary block">Create Room</span>
+                      <span className="text-xs text-text-muted">Host a game</span>
+                    </div>
+                  </motion.button>
+
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setShowJoinModal(true)}
+                    className="flex items-center gap-3 p-4 rounded-2xl bg-gradient-to-br from-purple/20 to-magenta/20 border border-purple/30 hover:border-purple/50 transition-all"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-purple/30 flex items-center justify-center">
+                      <UserPlus size={20} className="text-purple-light" />
+                    </div>
+                    <div className="text-left">
+                      <span className="text-sm font-semibold text-text-primary block">Join Room</span>
+                      <span className="text-xs text-text-muted">Enter code</span>
+                    </div>
+                  </motion.button>
+                </div>
+              </motion.div>
+
               {/* Solo Games Section */}
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
@@ -310,6 +432,23 @@ export function FunPage() {
           )}
         </AnimatePresence>
       </div>
+
+      {/* Modals */}
+      <CreateRoomModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onCreate={handleCreateRoom}
+        isLoading={isLoading}
+        error={error}
+      />
+
+      <JoinRoomModal
+        isOpen={showJoinModal}
+        onClose={() => setShowJoinModal(false)}
+        onJoin={handleJoinRoom}
+        isLoading={isLoading}
+        error={error}
+      />
     </div>
   );
 }

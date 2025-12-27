@@ -7,18 +7,20 @@ interface PlayerAvatarProps {
   name?: string;
   isHost?: boolean;
   isConnected?: boolean;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'xs' | 'sm' | 'md' | 'lg';
   showName?: boolean;
   className?: string;
 }
 
 const sizeClasses = {
+  xs: 'w-5 h-5 text-xs',
   sm: 'w-8 h-8 text-sm',
   md: 'w-10 h-10 text-lg',
   lg: 'w-14 h-14 text-2xl',
 };
 
 const crownSizes = {
+  xs: 8,
   sm: 10,
   md: 12,
   lg: 16,

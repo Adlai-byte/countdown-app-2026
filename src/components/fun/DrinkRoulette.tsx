@@ -1,23 +1,187 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { RotateCcw, Wine, Users, Zap, Shield } from 'lucide-react';
+import { RotateCcw, Wine, Users, Zap, Shield, Trophy } from 'lucide-react';
 import { Card, Button } from '@/components/ui';
 import { getRandomRouletteOption, type RouletteOption } from '@/data/drinkingGames';
 import { useConfetti } from '@/hooks/useConfetti';
+import { useRoom } from '@/hooks/multiplayer';
+import { PlayerAvatar, GameLeaderboard, type LeaderboardPlayer } from '@/components/multiplayer';
 import useSound from 'use-sound';
 
 const SPIN_SOUND = 'https://assets.mixkit.co/active_storage/sfx/2003/2003-preview.mp3';
 const RESULT_SOUND = 'https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3';
 
+interface DrinkRouletteGameState {
+  currentSpinnerId: string | null;
+  isSpinning: boolean;
+  result: RouletteOption | null;
+  rotation: number;
+  turnOrder: string[];
+  currentTurnIndex: number;
+  spinCount: number;
+  playerScores: Record<string, number>;
+  // Sync params for animation
+  spinStartRotation?: number;
+  spinTargetRotation?: number;
+  spinStartTime?: number;
+  pendingResult?: RouletteOption;
+}
+
 export function DrinkRoulette() {
-  const [result, setResult] = useState<RouletteOption | null>(null);
-  const [isSpinning, setIsSpinning] = useState(false);
-  const [rotation, setRotation] = useState(0);
+  const {
+    room,
+    players: roomPlayers,
+    currentPlayer,
+    isHost,
+    updateGameState,
+  } = useRoom();
+
+  const isMultiplayer = room?.status === 'playing' && room?.game_type === 'drink-roulette';
+
+  // Local state for solo play
+  const [localResult, setLocalResult] = useState<RouletteOption | null>(null);
+  const [localIsSpinning, setLocalIsSpinning] = useState(false);
+  const [localRotation, setLocalRotation] = useState(0);
+
+  // Animated rotation for multiplayer (smooth local animation)
+  const [animatedRotation, setAnimatedRotation] = useState(0);
+
   const spinRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const { fireSmall, fireCelebration } = useConfetti();
 
   const [playSpin] = useSound(SPIN_SOUND, { volume: 0.3 });
   const [playResult] = useSound(RESULT_SOUND, { volume: 0.4 });
+
+  // Get game state
+  const gameState = room?.game_state as DrinkRouletteGameState | undefined;
+  const connectedPlayers = roomPlayers.filter(p => p.is_connected);
+
+  // Derived state
+  const result = isMultiplayer ? gameState?.result : localResult;
+  const isSpinning = isMultiplayer ? (gameState?.isSpinning || false) : localIsSpinning;
+  // Use animated rotation during spin, final rotation when idle
+  const rotation = isMultiplayer
+    ? (gameState?.isSpinning ? animatedRotation : (gameState?.rotation || 0))
+    : localRotation;
+  const playerScores = gameState?.playerScores || {};
+
+  // Current turn player
+  const currentTurnPlayer = isMultiplayer && gameState?.turnOrder
+    ? connectedPlayers.find(p => p.id === gameState.turnOrder[gameState.currentTurnIndex || 0])
+    : null;
+
+  const isMyTurn = isMultiplayer
+    ? currentPlayer?.id === currentTurnPlayer?.id
+    : true;
+
+  // Leaderboard data
+  const leaderboardPlayers = useMemo((): LeaderboardPlayer[] => {
+    if (!isMultiplayer) return [];
+
+    return connectedPlayers.map(player => ({
+      playerId: player.id,
+      playerName: player.name,
+      avatarEmoji: player.avatar_emoji,
+      avatarColor: player.avatar_color,
+      score: playerScores[player.id] || 0,
+      isCurrentPlayer: player.id === currentPlayer?.id,
+    }));
+  }, [isMultiplayer, connectedPlayers, playerScores, currentPlayer?.id]);
+
+  // Initialize game for multiplayer
+  useEffect(() => {
+    if (isMultiplayer && isHost && !gameState?.turnOrder?.length) {
+      const shuffled = [...connectedPlayers].sort(() => Math.random() - 0.5);
+      updateGameState({
+        currentSpinnerId: null,
+        isSpinning: false,
+        result: null,
+        rotation: 0,
+        turnOrder: shuffled.map(p => p.id),
+        currentTurnIndex: 0,
+        spinCount: 0,
+        playerScores: {},
+      });
+    }
+  }, [isMultiplayer, isHost, gameState?.turnOrder?.length, connectedPlayers]);
+
+  // Sync animated rotation with final rotation when not spinning
+  useEffect(() => {
+    if (isMultiplayer && !gameState?.isSpinning && gameState?.rotation !== undefined) {
+      setAnimatedRotation(gameState.rotation);
+    }
+  }, [isMultiplayer, gameState?.isSpinning, gameState?.rotation]);
+
+  // Synced spin animation - runs on ALL clients when isSpinning is true
+  useEffect(() => {
+    if (!isMultiplayer || !gameState?.isSpinning) return;
+
+    const { spinStartRotation, spinTargetRotation, spinStartTime, pendingResult } = gameState;
+    if (spinStartRotation === undefined || spinTargetRotation === undefined || !spinStartTime) return;
+
+    const spinDuration = 3000;
+
+    // Start the animation interval
+    if (spinRef.current === null) {
+      playSpin();
+
+      spinRef.current = setInterval(() => {
+        const now = Date.now();
+        const elapsed = now - spinStartTime;
+        const progress = Math.min(elapsed / spinDuration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const newRotation = spinStartRotation + (spinTargetRotation - spinStartRotation) * eased;
+
+        // Update local animated rotation for smooth display
+        setAnimatedRotation(newRotation);
+
+        if (progress >= 1) {
+          if (spinRef.current) {
+            clearInterval(spinRef.current);
+            spinRef.current = null;
+          }
+
+          // Only the spinner finalizes the result
+          if (isMyTurn && pendingResult) {
+            const newScores = { ...playerScores };
+            if (currentPlayer?.id) {
+              newScores[currentPlayer.id] = (newScores[currentPlayer.id] || 0) + 1;
+            }
+
+            const nextIndex = ((gameState.currentTurnIndex || 0) + 1) % (gameState.turnOrder?.length || 1);
+
+            updateGameState({
+              ...gameState,
+              isSpinning: false,
+              result: pendingResult,
+              rotation: spinTargetRotation,
+              currentTurnIndex: nextIndex,
+              spinCount: (gameState.spinCount || 0) + 1,
+              playerScores: newScores,
+              pendingResult: undefined,
+              spinStartRotation: undefined,
+              spinTargetRotation: undefined,
+              spinStartTime: undefined,
+            });
+
+            playResult();
+            if (pendingResult.type === 'safe') {
+              fireCelebration();
+            } else {
+              fireSmall();
+            }
+          }
+        }
+      }, 16);
+    }
+
+    return () => {
+      if (spinRef.current) {
+        clearInterval(spinRef.current);
+        spinRef.current = null;
+      }
+    };
+  }, [isMultiplayer, gameState?.isSpinning, gameState?.spinStartTime]);
 
   const getTypeIcon = (type: string) => {
     switch (type) {
@@ -49,58 +213,113 @@ export function DrinkRoulette() {
     }
   };
 
-  const spin = useCallback(() => {
+  const spin = useCallback(async () => {
     if (isSpinning) return;
 
-    setIsSpinning(true);
-    setResult(null);
-    playSpin();
+    if (isMultiplayer) {
+      // Only the current turn player can spin (strict turn-based)
+      if (!isMyTurn) return;
 
-    // Start rotation animation
-    let currentRotation = rotation;
-    const targetRotation = currentRotation + 1440 + Math.random() * 720; // 4-6 full spins
+      const startRotation = rotation;
+      const targetRotation = startRotation + 1440 + Math.random() * 720;
+      const option = getRandomRouletteOption(); // Pre-determine result for sync
 
-    const spinDuration = 3000; // 3 seconds
-    const startTime = Date.now();
+      // Start spinning - include target rotation and result in state for sync
+      await updateGameState({
+        ...gameState,
+        isSpinning: true,
+        result: null,
+        currentSpinnerId: currentPlayer?.id,
+        // Store spin params so all clients animate the same
+        spinStartRotation: startRotation,
+        spinTargetRotation: targetRotation,
+        spinStartTime: Date.now(),
+        pendingResult: option,
+      });
 
-    spinRef.current = setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(elapsed / spinDuration, 1);
+      playSpin();
+    } else {
+      setLocalIsSpinning(true);
+      setLocalResult(null);
+      playSpin();
 
-      // Easing function (ease out cubic)
-      const eased = 1 - Math.pow(1 - progress, 3);
-      const newRotation = currentRotation + (targetRotation - currentRotation) * eased;
+      let currentRotation = localRotation;
+      const targetRotation = currentRotation + 1440 + Math.random() * 720;
 
-      setRotation(newRotation);
+      const spinDuration = 3000;
+      const startTime = Date.now();
 
-      if (progress >= 1) {
-        if (spinRef.current) {
-          clearInterval(spinRef.current);
+      spinRef.current = setInterval(() => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / spinDuration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const newRotation = currentRotation + (targetRotation - currentRotation) * eased;
+
+        setLocalRotation(newRotation);
+
+        if (progress >= 1) {
+          if (spinRef.current) {
+            clearInterval(spinRef.current);
+          }
+          setLocalIsSpinning(false);
+
+          const option = getRandomRouletteOption();
+          setLocalResult(option);
+          playResult();
+
+          if (option.type === 'safe') {
+            fireCelebration();
+          } else {
+            fireSmall();
+          }
         }
-        setIsSpinning(false);
+      }, 16);
+    }
+  }, [isSpinning, isMultiplayer, isMyTurn, isHost, rotation, gameState, currentTurnPlayer, currentPlayer, playerScores, playSpin, playResult, fireSmall, fireCelebration, localRotation]);
 
-        // Get result
-        const option = getRandomRouletteOption();
-        setResult(option);
-        playResult();
-
-        if (option.type === 'safe') {
-          fireCelebration();
-        } else {
-          fireSmall();
-        }
-      }
-    }, 16);
-  }, [isSpinning, rotation, playSpin, playResult, fireSmall, fireCelebration]);
-
-  // Cleanup
-  const reset = () => {
-    setResult(null);
-    setRotation(0);
+  const reset = async () => {
+    if (isMultiplayer) {
+      if (!isHost) return;
+      await updateGameState({
+        ...gameState,
+        result: null,
+      });
+    } else {
+      setLocalResult(null);
+      setLocalRotation(0);
+    }
   };
 
   return (
     <div className="space-y-4">
+      {/* Multiplayer Turn Indicator */}
+      {isMultiplayer && currentTurnPlayer && (
+        <Card variant="glass" className="p-3">
+          <div className="flex items-center justify-center gap-2">
+            <PlayerAvatar
+              emoji={currentTurnPlayer.avatar_emoji}
+              color={currentTurnPlayer.avatar_color}
+              size="sm"
+              isHost={currentTurnPlayer.is_host}
+            />
+            <span className="font-medium">
+              {isMyTurn ? "Your turn to spin!" : `${currentTurnPlayer.name}'s turn`}
+            </span>
+          </div>
+        </Card>
+      )}
+
+      {/* Multiplayer Leaderboard */}
+      {isMultiplayer && leaderboardPlayers.length > 0 && (gameState?.spinCount || 0) > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-sm text-text-muted">
+            <Trophy size={14} className="text-gold" />
+            <span>Spins</span>
+          </div>
+          <GameLeaderboard players={leaderboardPlayers} compact />
+        </div>
+      )}
+
       {/* Wheel */}
       <Card variant="glass" className="py-8">
         <div className="relative flex flex-col items-center">
@@ -143,33 +362,35 @@ export function DrinkRoulette() {
               </div>
             </div>
 
-            {/* Segments */}
-            {['🍷', '🎯', '🛡️', '👥', '🍺', '⚡', '🎉', '🥂'].map((emoji, i) => (
-              <div
-                key={i}
-                className="absolute"
-                style={{
-                  top: '50%',
-                  left: '50%',
-                  transform: `rotate(${i * 45 + 22.5}deg) translateY(-70px)`,
-                }}
-              >
-                <span
-                  className="text-xl"
-                  style={{ transform: `rotate(-${i * 45 + 22.5}deg)`, display: 'block' }}
+            {/* Segments - positioned around the wheel */}
+            {['🍷', '🎯', '🛡️', '👥', '🍺', '⚡', '🎉', '🥂'].map((emoji, i) => {
+              const angle = i * 45 + 22.5;
+              const radians = (angle - 90) * (Math.PI / 180);
+              const radius = 70;
+              const x = Math.cos(radians) * radius;
+              const y = Math.sin(radians) * radius;
+              return (
+                <div
+                  key={i}
+                  className="absolute text-xl"
+                  style={{
+                    top: '50%',
+                    left: '50%',
+                    transform: `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`,
+                  }}
                 >
                   {emoji}
-                </span>
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </motion.div>
 
           {/* Spin Button */}
           <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
+            whileHover={isMyTurn || !isMultiplayer ? { scale: 1.05 } : {}}
+            whileTap={isMyTurn || !isMultiplayer ? { scale: 0.95 } : {}}
             onClick={spin}
-            disabled={isSpinning}
+            disabled={isSpinning || (isMultiplayer && !isMyTurn)}
             className={`
               mt-6 px-8 py-3 rounded-full font-bold text-white
               bg-gradient-to-r from-purple to-magenta
@@ -177,7 +398,11 @@ export function DrinkRoulette() {
               shadow-lg shadow-purple/30
             `}
           >
-            {isSpinning ? 'Spinning...' : 'SPIN!'}
+            {isSpinning
+              ? 'Spinning...'
+              : isMultiplayer && !isMyTurn
+                ? `${currentTurnPlayer?.name}'s turn`
+                : 'SPIN!'}
           </motion.button>
         </div>
       </Card>
@@ -225,7 +450,7 @@ export function DrinkRoulette() {
       </AnimatePresence>
 
       {/* Reset Button */}
-      {result && (
+      {result && (!isMultiplayer || isHost) && (
         <Button variant="ghost" onClick={reset} className="w-full">
           <RotateCcw size={18} className="mr-2" />
           Clear Result

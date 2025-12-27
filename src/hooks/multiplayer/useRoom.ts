@@ -20,7 +20,7 @@ interface UseRoomReturn {
   error: string | null;
 
   // Room actions
-  createRoom: (playerName: string, avatarColor?: string, avatarEmoji?: string) => Promise<void>;
+  createRoom: (gameType: GameType, playerName: string, avatarColor?: string, avatarEmoji?: string) => Promise<void>;
   joinRoom: (code: string, playerName: string, avatarColor?: string, avatarEmoji?: string) => Promise<void>;
   leaveRoom: () => Promise<void>;
 
@@ -28,7 +28,7 @@ interface UseRoomReturn {
   kickPlayer: (playerId: string) => Promise<void>;
   transferHost: (playerId: string) => Promise<void>;
   updateSettings: (settings: Partial<RoomSettings>) => Promise<void>;
-  startGame: (gameType: GameType, initialState?: Record<string, unknown>) => Promise<void>;
+  startGame: (initialState?: Record<string, unknown>) => Promise<void>;
   endGame: () => Promise<void>;
 
   // Game state
@@ -127,6 +127,7 @@ export function useRoom(): UseRoomReturn {
 
   const createRoom = useCallback(
     async (
+      gameType: GameType,
       playerName: string,
       avatarColor = localAvatarColor,
       avatarEmoji = localAvatarEmoji
@@ -141,6 +142,7 @@ export function useRoom(): UseRoomReturn {
 
       try {
         const result = await roomService.createRoom({
+          gameType,
           playerName,
           avatarColor,
           avatarEmoji,
@@ -257,11 +259,11 @@ export function useRoom(): UseRoomReturn {
   );
 
   const startGame = useCallback(
-    async (gameType: GameType, initialState: Record<string, unknown> = {}) => {
-      if (!currentRoom || !isHost) return;
+    async (initialState: Record<string, unknown> = {}) => {
+      if (!currentRoom || !isHost || !currentRoom.game_type) return;
 
       try {
-        await roomService.startGame(currentRoom.id, gameType, initialState);
+        await roomService.startGame(currentRoom.id, currentRoom.game_type, initialState);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to start game');
       }

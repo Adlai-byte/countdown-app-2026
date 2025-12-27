@@ -38,6 +38,7 @@ const toPlayer = (row: PlayerRow): Player => ({
 });
 
 export interface CreateRoomOptions {
+  gameType: GameType;
   playerName: string;
   avatarColor?: string;
   avatarEmoji?: string;
@@ -66,7 +67,7 @@ export const roomService = {
       throw new Error('Supabase not configured');
     }
 
-    const { playerName, avatarColor = '#9333ea', avatarEmoji = '😀', settings = {} } = options;
+    const { gameType, playerName, avatarColor = '#9333ea', avatarEmoji = '😀', settings = {} } = options;
 
     // Generate unique room code (retry if collision)
     let code: string;
@@ -101,6 +102,7 @@ export const roomService = {
       .insert({
         code,
         host_id: '00000000-0000-0000-0000-000000000000', // Placeholder, updated after player creation
+        game_type: gameType,
         status: 'lobby',
         settings: roomSettings,
         game_state: {},
