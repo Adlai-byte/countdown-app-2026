@@ -3,18 +3,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Globe, ChevronDown } from 'lucide-react';
 import { CountdownTimer } from '@/components/countdown/CountdownTimer';
 import { TimeZoneParty } from '@/components/countdown/TimeZoneParty';
-import { LiveVisitorCount } from '@/components/multiplayer';
 
 export function HomePage() {
   const [showWorldCountdown, setShowWorldCountdown] = useState(false);
 
   return (
     <div className="flex-1 flex flex-col pb-24 overflow-y-auto">
-      {/* Live Visitor Count */}
-      <div className="flex justify-center pt-4 px-4">
-        <LiveVisitorCount variant="badge" />
-      </div>
-
       {/* Main Countdown */}
       <div className="flex-1 flex flex-col items-center justify-center min-h-[60vh]">
         <CountdownTimer />
